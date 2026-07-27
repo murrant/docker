@@ -1,13 +1,13 @@
 name: librenms
 
 x-librenms-environment: &librenms-environment
-  TZ: "${TZ:-Europe/Paris}"
-  PUID: "${PUID:-1000}"
-  PGID: "${PGID:-1000}"
+  TZ: &TZ Europe/Paris
+  PUID: &PUID "1000"
+  PGID: &PGID "1000"
   DB_HOST: db
-  DB_DATABASE: "${MARIADB_DATABASE:-librenms}"
-  DB_USERNAME: "${MARIADB_USER:-librenms}"
-  DB_PASSWORD: "${MARIADB_PASSWORD:-asupersecretpassword}"
+  DB_DATABASE: &DB_DATABASE librenms
+  DB_USERNAME: &DB_USERNAME librenms
+  DB_PASSWORD: &DB_PASSWORD asupersecretpassword
   DB_TIMEOUT: "60"
   CACHE_DRIVER: redis
   SESSION_DRIVER: redis
@@ -26,33 +26,33 @@ services:
     volumes:
       - "./db:/var/lib/mysql"
     environment:
-      TZ: "${TZ:-Europe/Paris}"
+      TZ: *TZ
       MARIADB_RANDOM_ROOT_PASSWORD: "yes"
-      MARIADB_DATABASE: "${MARIADB_DATABASE:-librenms}"
-      MARIADB_USER: "${MARIADB_USER:-librenms}"
-      MARIADB_PASSWORD: "${MARIADB_PASSWORD:-asupersecretpassword}"
+      MARIADB_DATABASE: *DB_DATABASE
+      MARIADB_USER: *DB_USERNAME
+      MARIADB_PASSWORD: *DB_PASSWORD
     restart: always
 
   redis:
     image: redis:7.2-alpine
     container_name: librenms_redis
     environment:
-      TZ: "${TZ:-Europe/Paris}"
+      TZ: *TZ
     restart: always
 
   msmtpd:
     image: crazymax/msmtpd:latest
     container_name: librenms_msmtpd
     environment:
-      SMTP_HOST: "${SMTP_HOST:-smtp.gmail.com}"
-      SMTP_PORT: "${SMTP_PORT:-587}"
-      SMTP_TLS: "${SMTP_TLS:-on}"
-      SMTP_STARTTLS: "${SMTP_STARTTLS:-on}"
-      SMTP_TLS_CHECKCERT: "${SMTP_TLS_CHECKCERT:-on}"
-      SMTP_AUTH: "${SMTP_AUTH:-on}"
-      SMTP_USER: "${SMTP_USER:-foo}"
-      SMTP_PASSWORD: "${SMTP_PASSWORD:-bar}"
-      SMTP_FROM: "${SMTP_FROM:-foo@gmail.com}"
+      SMTP_HOST: smtp.gmail.com
+      SMTP_PORT: "587"
+      SMTP_TLS: "on"
+      SMTP_STARTTLS: "on"
+      SMTP_TLS_CHECKCERT: "on"
+      SMTP_AUTH: "on"
+      SMTP_USER: foo
+      SMTP_PASSWORD: bar
+      SMTP_FROM: foo@gmail.com
     restart: always
 
   librenms:
@@ -90,7 +90,7 @@ services:
       - "./librenms:/data"
     environment:
       <<: *librenms-environment
-      NODE_ID: "${NODE_ID:-dispatcher1}"
+      NODE_ID: dispatcher1
       SIDECAR_DISPATCHER: "1"
     restart: always
 

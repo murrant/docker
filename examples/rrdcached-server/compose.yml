@@ -1,11 +1,25 @@
 name: librenms
 
+x-librenms-environment: &librenms-environment
+  TZ: "${TZ:-Europe/Paris}"
+  PUID: "${PUID:-1000}"
+  PGID: "${PGID:-1000}"
+  DB_HOST: db
+  DB_DATABASE: "${MARIADB_DATABASE:-librenms}"
+  DB_USERNAME: "${MARIADB_USER:-librenms}"
+  DB_PASSWORD: "${MARIADB_PASSWORD:-asupersecretpassword}"
+  DB_TIMEOUT: "60"
+  CACHE_DRIVER: redis
+  SESSION_DRIVER: redis
+  REDIS_HOST: redis
+  RRDCACHED_SERVER: "${RRDCACHED_SERVER:-rrdcached:42217}"
+
 services:
   db:
-    image: mariadb:10
+    image: mariadb:11.8
     container_name: librenms_db
     command:
-      - "mysqld"
+      - "mariadbd"
       - "--innodb-file-per-table=1"
       - "--lower-case-table-names=0"
       - "--character-set-server=utf8mb4"
@@ -13,18 +27,18 @@ services:
     volumes:
       - "./db:/var/lib/mysql"
     environment:
-      - "TZ=${TZ}"
-      - "MARIADB_RANDOM_ROOT_PASSWORD=yes"
-      - "MYSQL_DATABASE=${MYSQL_DATABASE}"
-      - "MYSQL_USER=${MYSQL_USER}"
-      - "MYSQL_PASSWORD=${MYSQL_PASSWORD}"
+      TZ: "${TZ:-Europe/Paris}"
+      MARIADB_RANDOM_ROOT_PASSWORD: "yes"
+      MARIADB_DATABASE: "${MARIADB_DATABASE:-librenms}"
+      MARIADB_USER: "${MARIADB_USER:-librenms}"
+      MARIADB_PASSWORD: "${MARIADB_PASSWORD:-asupersecretpassword}"
     restart: always
 
   redis:
     image: redis:7.2-alpine
     container_name: librenms_redis
     environment:
-      - "TZ=${TZ}"
+      TZ: "${TZ:-Europe/Paris}"
     restart: always
 
   rrdcached:
@@ -34,21 +48,29 @@ services:
       - "./rrd/db:/data/db"
       - "./rrd/journal:/data/journal"
     environment:
-      - "TZ=${TZ}"
-      - "PUID=${PUID}"
-      - "PGID=${PGID}"
-      - "LOG_LEVEL=LOG_INFO"
-      - "WRITE_TIMEOUT=1800"
-      - "WRITE_JITTER=1800"
-      - "WRITE_THREADS=4"
-      - "FLUSH_DEAD_DATA_INTERVAL=3600"
+      TZ: "${TZ:-Europe/Paris}"
+      PUID: "${PUID:-1000}"
+      PGID: "${PGID:-1000}"
+      LOG_LEVEL: "${RRDCACHED_LOG_LEVEL:-LOG_INFO}"
+      WRITE_TIMEOUT: "${RRDCACHED_WRITE_TIMEOUT:-1800}"
+      WRITE_JITTER: "${RRDCACHED_WRITE_JITTER:-1800}"
+      WRITE_THREADS: "${RRDCACHED_WRITE_THREADS:-4}"
+      FLUSH_DEAD_DATA_INTERVAL: "${RRDCACHED_FLUSH_DEAD_DATA_INTERVAL:-3600}"
     restart: always
 
   msmtpd:
     image: crazymax/msmtpd:latest
     container_name: librenms_msmtpd
-    env_file:
-      - "./msmtpd.env"
+    environment:
+      SMTP_HOST: "${SMTP_HOST:-smtp.gmail.com}"
+      SMTP_PORT: "${SMTP_PORT:-587}"
+      SMTP_TLS: "${SMTP_TLS:-on}"
+      SMTP_STARTTLS: "${SMTP_STARTTLS:-on}"
+      SMTP_TLS_CHECKCERT: "${SMTP_TLS_CHECKCERT:-on}"
+      SMTP_AUTH: "${SMTP_AUTH:-on}"
+      SMTP_USER: "${SMTP_USER:-foo}"
+      SMTP_PASSWORD: "${SMTP_PASSWORD:-bar}"
+      SMTP_FROM: "${SMTP_FROM:-foo@gmail.com}"
     restart: always
 
   librenms:
@@ -69,17 +91,8 @@ services:
       - msmtpd
     volumes:
       - "./librenms:/data"
-    env_file:
-      - "./librenms.env"
     environment:
-      - "TZ=${TZ}"
-      - "PUID=${PUID}"
-      - "PGID=${PGID}"
-      - "DB_HOST=db"
-      - "DB_NAME=${MYSQL_DATABASE}"
-      - "DB_USER=${MYSQL_USER}"
-      - "DB_PASSWORD=${MYSQL_PASSWORD}"
-      - "DB_TIMEOUT=60"
+      <<: *librenms-environment
     restart: always
 
   dispatcher:
@@ -94,19 +107,10 @@ services:
       - redis
     volumes:
       - "./librenms:/data"
-    env_file:
-      - "./librenms.env"
     environment:
-      - "TZ=${TZ}"
-      - "PUID=${PUID}"
-      - "PGID=${PGID}"
-      - "DB_HOST=db"
-      - "DB_NAME=${MYSQL_DATABASE}"
-      - "DB_USER=${MYSQL_USER}"
-      - "DB_PASSWORD=${MYSQL_PASSWORD}"
-      - "DB_TIMEOUT=60"
-      - "DISPATCHER_NODE_ID=dispatcher1"
-      - "SIDECAR_DISPATCHER=1"
+      <<: *librenms-environment
+      NODE_ID: "${NODE_ID:-dispatcher1}"
+      SIDECAR_DISPATCHER: "1"
     restart: always
 
   syslogng:
@@ -128,18 +132,9 @@ services:
         protocol: udp
     volumes:
       - "./librenms:/data"
-    env_file:
-      - "./librenms.env"
     environment:
-      - "TZ=${TZ}"
-      - "PUID=${PUID}"
-      - "PGID=${PGID}"
-      - "DB_HOST=db"
-      - "DB_NAME=${MYSQL_DATABASE}"
-      - "DB_USER=${MYSQL_USER}"
-      - "DB_PASSWORD=${MYSQL_PASSWORD}"
-      - "DB_TIMEOUT=60"
-      - "SIDECAR_SYSLOGNG=1"
+      <<: *librenms-environment
+      SIDECAR_SYSLOGNG: "1"
     restart: always
 
   snmptrapd:
@@ -161,16 +156,7 @@ services:
         protocol: udp
     volumes:
       - "./librenms:/data"
-    env_file:
-      - "./librenms.env"
     environment:
-      - "TZ=${TZ}"
-      - "PUID=${PUID}"
-      - "PGID=${PGID}"
-      - "DB_HOST=db"
-      - "DB_NAME=${MYSQL_DATABASE}"
-      - "DB_USER=${MYSQL_USER}"
-      - "DB_PASSWORD=${MYSQL_PASSWORD}"
-      - "DB_TIMEOUT=60"
-      - "SIDECAR_SNMPTRAPD=1"
+      <<: *librenms-environment
+      SIDECAR_SNMPTRAPD: "1"
     restart: always

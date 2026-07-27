@@ -25,16 +25,46 @@ file_env() {
   unset "$fileVar"
 }
 
+set_container_env() {
+  local var="$1"
+  local value="$2"
+
+  export "$var"="$value"
+  printf '%s' "$value" >"/var/run/s6/container_environment/$var"
+}
+
+env_file_has() {
+  local var="$1"
+
+  [ -f /data/.env ] && grep -q "^${var}=" /data/.env
+}
+
+set_optional_env() {
+  local var="$1"
+  local value="$2"
+  local was_set="$3"
+
+  if [ "$was_set" = "x" ] || ! env_file_has "$var"; then
+    set_container_env "$var" "$value"
+  fi
+}
+
+REDIS_SENTINEL_SERVICE_WAS_SET=${REDIS_SENTINEL_SERVICE+x}
+REDIS_SCHEME_WAS_SET=${REDIS_SCHEME+x}
+REDIS_PORT_WAS_SET=${REDIS_PORT+x}
+REDIS_PASSWORD_WAS_SET=${REDIS_PASSWORD+x}
+REDIS_PASSWORD_FILE_WAS_SET=${REDIS_PASSWORD_FILE+x}
+REDIS_DB_WAS_SET=${REDIS_DB+x}
+
 DB_PORT=${DB_PORT:-3306}
-DB_NAME=${DB_NAME:-librenms}
-DB_USER=${DB_USER:-librenms}
+DB_DATABASE=${DB_DATABASE:-${DB_NAME:-librenms}}
+DB_USERNAME=${DB_USERNAME:-${DB_USER:-librenms}}
 DB_TIMEOUT=${DB_TIMEOUT:-60}
 LOG_CHANNEL=${LOG_CHANNEL:-stdout}
 LOG_LEVEL=${LOG_LEVEL:-warning}
 STDOUT_LOG_LEVEL=${STDOUT_LOG_LEVEL:-$LOG_LEVEL}
 
 SIDECAR_DISPATCHER=${SIDECAR_DISPATCHER:-0}
-#DISPATCHER_NODE_ID=${DISPATCHER_NODE_ID:-dispatcher1}
 
 #REDIS_HOST=${REDIS_HOST:-localhost}
 REDIS_SCHEME=${REDIS_SCHEME:-tcp}
@@ -42,6 +72,9 @@ REDIS_PORT=${REDIS_PORT:-6379}
 #REDIS_SENTINEL=${REDIS_SENTINEL:-localhost}
 REDIS_SENTINEL_SERVICE=${REDIS_SENTINEL_SERVICE:-librenms}
 file_env 'REDIS_PASSWORD'
+if [ "$REDIS_PASSWORD_FILE_WAS_SET" = "x" ]; then
+  REDIS_PASSWORD_WAS_SET=x
+fi
 REDIS_DB=${REDIS_DB:-0}
 
 # Continue only if sidecar dispatcher container
@@ -59,7 +92,7 @@ if [ -z "$DB_PASSWORD" ]; then
   exit 1
 fi
 
-dbcmd="mariadb -h ${DB_HOST} -P ${DB_PORT} -u "${DB_USER}" "-p${DB_PASSWORD}""
+dbcmd="mariadb -h ${DB_HOST} -P ${DB_PORT} -u "${DB_USERNAME}" "-p${DB_PASSWORD}""
 unset DB_PASSWORD
 
 echo "Waiting ${DB_TIMEOUT}s for database to be ready..."
@@ -73,50 +106,37 @@ while ! ${dbcmd} -e "show databases;" >/dev/null 2>&1; do
   fi
 done
 echo "Database ready!"
-while ! ${dbcmd} -e "desc $DB_NAME.poller_cluster;" >/dev/null 2>&1; do
+while ! ${dbcmd} -e "desc $DB_DATABASE.poller_cluster;" >/dev/null 2>&1; do
   sleep 1
   counter=$((counter + 1))
   if [ ${counter} -gt ${DB_TIMEOUT} ]; then
-    echo >&2 "ERROR: Table $DB_NAME.poller_cluster does not exist on $DB_HOST"
+    echo >&2 "ERROR: Table $DB_DATABASE.poller_cluster does not exist on $DB_HOST"
     exit 1
   fi
 done
 
-# Node ID
-if [ ! -f "/data/.env" ]; then
-  echo >&2 "ERROR: /data/.env file does not exist. Please run the main container first"
-  exit 1
-fi
-cat "/data/.env" >>"${LIBRENMS_PATH}/.env"
-if [ -n "$DISPATCHER_NODE_ID" ]; then
-  echo "NODE_ID: $DISPATCHER_NODE_ID"
-  sed -i "s|^NODE_ID=.*|NODE_ID=$DISPATCHER_NODE_ID|g" "${LIBRENMS_PATH}/.env"
-fi
+echo "NODE_ID: $NODE_ID"
 
 # Redis
-if [ -z "$REDIS_HOST" ] && [ -z "$REDIS_SENTINEL" ]; then
+if [ -z "$REDIS_HOST" ] && [ -z "$REDIS_SENTINEL" ] && ! env_file_has 'REDIS_HOST' && ! env_file_has 'REDIS_SENTINEL'; then
   echo >&2 "ERROR: REDIS_HOST or REDIS_SENTINEL must be defined"
   exit 1
-elif [ -n "$REDIS_SENTINEL" ]; then
+elif [ -n "$REDIS_SENTINEL" ] || env_file_has 'REDIS_SENTINEL'; then
   echo "Setting Redis Sentinel"
-  cat >>${LIBRENMS_PATH}/.env <<EOL
-REDIS_SENTINEL=${REDIS_SENTINEL}
-REDIS_SENTINEL_SERVICE=${REDIS_SENTINEL_SERVICE}
-REDIS_SCHEME=${REDIS_SCHEME}
-REDIS_PORT=${REDIS_PORT}
-REDIS_PASSWORD=${REDIS_PASSWORD}
-REDIS_DB=${REDIS_DB}
-EOL
-elif [ -n "$REDIS_HOST" ]; then
+  if [ -n "$REDIS_SENTINEL" ]; then
+    set_container_env 'REDIS_SENTINEL' "$REDIS_SENTINEL"
+  fi
+  set_optional_env 'REDIS_SENTINEL_SERVICE' "$REDIS_SENTINEL_SERVICE" "$REDIS_SENTINEL_SERVICE_WAS_SET"
+elif [ -n "$REDIS_HOST" ] || env_file_has 'REDIS_HOST'; then
   echo "Setting Redis"
-  cat >>${LIBRENMS_PATH}/.env <<EOL
-REDIS_HOST=${REDIS_HOST}
-REDIS_SCHEME=${REDIS_SCHEME}
-REDIS_PORT=${REDIS_PORT}
-REDIS_PASSWORD=${REDIS_PASSWORD}
-REDIS_DB=${REDIS_DB}
-EOL
+  if [ -n "$REDIS_HOST" ]; then
+    set_container_env 'REDIS_HOST' "$REDIS_HOST"
+  fi
 fi
+set_optional_env 'REDIS_SCHEME' "$REDIS_SCHEME" "$REDIS_SCHEME_WAS_SET"
+set_optional_env 'REDIS_PORT' "$REDIS_PORT" "$REDIS_PORT_WAS_SET"
+set_optional_env 'REDIS_PASSWORD' "$REDIS_PASSWORD" "$REDIS_PASSWORD_WAS_SET"
+set_optional_env 'REDIS_DB' "$REDIS_DB" "$REDIS_DB_WAS_SET"
 
 # Create service
 mkdir -p /etc/services.d/dispatcher

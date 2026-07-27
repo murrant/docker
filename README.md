@@ -115,7 +115,9 @@ linux/s390x
 * `MEMORY_LIMIT`: PHP memory limit (default `256M`)
 * `MAX_INPUT_VARS`: PHP max input vars (default `1000`)
 * `UPLOAD_MAX_SIZE`: Upload max size (default `16M`)
-* `CLEAR_ENV`: Clear environment in FPM workers (default `yes`)
+* `CLEAR_ENV`: Clear environment in FPM workers (default `yes`). Set to `no`
+  when a LibreNMS plugin or other runtime PHP code must read arbitrary
+  container environment variables directly.
 * `FPM_PM_MAX_CHILDREN`: FPM max Children (default: `15`)
 * `FPM_PM_START_SERVERS`: FPM start servers (default: `2`)
 * `FPM_PM_MIN_SPARE_SERVERS`: FPM min spare servers (default: `1`)
@@ -127,6 +129,8 @@ linux/s390x
 * `LOG_IP_VAR`: Use another variable to retrieve the remote IP address for access [log_format](http://nginx.org/en/docs/http/ngx_http_log_module.html#log_format) on Nginx. (default `remote_addr`)
 * `SESSION_DRIVER`: [Driver to use for session storage](https://github.com/librenms/librenms/blob/master/config/session.php) (default `file`)
 * `CACHE_DRIVER`: [Driver to use for cache and locks](https://github.com/librenms/librenms/blob/master/config/cache.php) (default `database`)
+* `NODE_ID`: Unique node ID. Generated automatically and retained across
+  container restarts.
 
 ### Redis
 
@@ -149,7 +153,7 @@ linux/s390x
 > You need at least one dispatcher sidecar, otherwise poller will not run [sidecar dispatcher container](#dispatcher-service-container).
 
 * `SIDECAR_DISPATCHER`: Set to `1` to enable sidecar dispatcher mode for this container (default `0`)
-* `DISPATCHER_NODE_ID`: Unique node ID for your dispatcher service
+* `DISPATCHER_NODE_ID`: Deprecated alias for `NODE_ID`
 * `DISPATCHER_ARGS`: Additional args to pass to the [dispatcher service](https://github.com/librenms/librenms/blob/master/librenms-service.py)
 
 ### Syslog-ng
@@ -178,16 +182,20 @@ linux/s390x
 
 ### Database
 
-* `DB_HOST`: MySQL database hostname / IP address
+* `DB_HOST`: MySQL database hostname / IP address (required)
 * `DB_PORT`: MySQL database port (default `3306`)
-* `DB_NAME`: MySQL database name (default `librenms`)
-* `DB_USER`: MySQL user (default `librenms`)
-* `DB_PASSWORD`: MySQL password (default `librenms`)
-* `DB_TIMEOUT`: Time in seconds after which we stop trying to reach the MySQL server (useful for clusters, default `60`)
+* `DB_DATABASE`: MySQL database name (default `librenms`)
+* `DB_USERNAME`: MySQL user (default `librenms`)
+* `DB_PASSWORD`: MySQL password (required; can also be supplied with
+  `DB_PASSWORD_FILE`)
+* `DB_TIMEOUT`: Time in seconds to wait for MySQL (default `60` seconds)
+* `DB_NAME`: Deprecated alias for `DB_DATABASE`
+* `DB_USER`: Deprecated alias for `DB_USERNAME`
 
 ### Misc
 
-* `LIBRENMS_BASE_URL`: URL of your LibreNMS instance (default `/`)
+* `APP_URL`: URL of your LibreNMS instance (default `/`)
+* `LIBRENMS_BASE_URL`: Deprecated alias for `APP_URL`
 * `LIBRENMS_SNMP_COMMUNITY`: This container's SNMP v2c community string (default `librenmsdocker`)
 * `MEMCACHED_HOST`: Hostname / IP address of a Memcached server
 * `MEMCACHED_PORT`: Port of the Memcached server (default `11211`)
@@ -214,13 +222,29 @@ linux/s390x
 
 Docker compose is the recommended way to run this image. Copy the content of
 folder [examples/compose](examples/compose) in `/var/librenms/` on your host
-for example. Edit the compose and env files with your preferences and run the
-following commands:
+for example. Set configuration through the shell environment or edit the
+Compose `environment` mappings, then run the following commands:
 
 ```console
 $ docker compose up -d
 $ docker compose logs -f
 ```
+
+The image writes the generated, shared `APP_KEY`, `VAPID_PUBLIC_KEY`, and
+`VAPID_PRIVATE_KEY` values to `/data/.env`. Every container receives the same
+keys. `NODE_ID` is added only to each container's runtime `.env` and defaults
+to a randomly generated 128-bit value, ensuring containers on the same host do
+not collide. That value is reused from the container's writable layer across
+restarts. Set `NODE_ID` to keep the same node identity when replacing a
+container. Existing entries in `/data/.env` are preserved and loaded as a
+fallback, so it remains available as a last-resort user escape hatch. Explicit
+container environment values take precedence. Normal configuration should be
+supplied through the container environment; it is propagated to service
+processes and Laravel's configuration cache on each start.
+
+Existing deployments that use Docker's `--env-file` or Compose `env_file`
+remain compatible because Docker injects those values into the container
+environment. The supplied examples no longer require either mechanism.
 
 ### Command line
 
@@ -230,6 +254,7 @@ You can also use the following minimal command:
 $ docker run -d -p 8000:8000 --name librenms \
   -v $(pwd)/data:/data \
   -e "DB_HOST=db" \
+  -e "DB_PASSWORD=librenms" \
   librenms/librenms:latest
 ```
 
@@ -341,9 +366,13 @@ like this:
 
 ```console
 $ docker run -d --name librenms_dispatcher \
-  --env-file $(pwd)/librenms.env \
+  -e DB_HOST \
+  -e DB_DATABASE \
+  -e DB_USERNAME \
+  -e DB_PASSWORD \
+  -e REDIS_HOST \
   -e SIDECAR_DISPATCHER=1 \
-  -e DISPATCHER_NODE_ID=dispatcher1 \
+  -e NODE_ID=dispatcher1 \
   -v librenms:/data \
   librenms/librenms:latest
 ```
@@ -359,7 +388,10 @@ run a simple container like this:
 
 ```console
 $ docker run -d --name librenms_syslog \
-  --env-file $(pwd)/librenms.env \
+  -e DB_HOST \
+  -e DB_DATABASE \
+  -e DB_USERNAME \
+  -e DB_PASSWORD \
   -e SIDECAR_SYSLOGNG=1 \
   -p 514 -p 514/udp \
   -v librenms:/data \
@@ -384,7 +416,10 @@ run a simple container like this:
 
 ```console
 $ docker run -d --name librenms_snmptrapd \
-  --env-file $(pwd)/librenms.env \
+  -e DB_HOST \
+  -e DB_DATABASE \
+  -e DB_USERNAME \
+  -e DB_PASSWORD \
   -e SIDECAR_SNMPTRAPD=1 \
   -p 162 -p 162/udp \
   -v librenms:/data \

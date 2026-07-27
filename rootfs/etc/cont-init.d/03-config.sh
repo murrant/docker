@@ -23,7 +23,63 @@ file_env() {
   fi
   export "$var"="$val"
   unset "$fileVar"
+  rm -f "/var/run/s6/container_environment/$fileVar"
 }
+
+set_container_env() {
+  local var="$1"
+  local value="$2"
+
+  export "$var"="$value"
+  printf '%s' "$value" >"/var/run/s6/container_environment/$var"
+}
+
+env_file_has() {
+  local var="$1"
+
+  [ -f /data/.env ] && grep -q "^${var}=" /data/.env
+}
+
+set_mapped_env() {
+  local target="$1"
+  local value="$2"
+  local target_was_set="$3"
+  local source_was_set="$4"
+
+  if [ "$target_was_set" = "x" ] || [ "$source_was_set" = "x" ] || ! env_file_has "$target"; then
+    set_container_env "$target" "$value"
+  fi
+}
+
+APP_URL_WAS_SET=${APP_URL+x}
+LIBRENMS_BASE_URL_WAS_SET=${LIBRENMS_BASE_URL+x}
+DB_PORT_WAS_SET=${DB_PORT+x}
+DB_DATABASE_WAS_SET=${DB_DATABASE+x}
+DB_NAME_WAS_SET=${DB_NAME+x}
+DB_USERNAME_WAS_SET=${DB_USERNAME+x}
+DB_USER_WAS_SET=${DB_USER+x}
+
+if [ "$DB_NAME_WAS_SET" = "x" ]; then
+  if [ "$DB_DATABASE_WAS_SET" = "x" ]; then
+    echo >&2 "WARNING: DB_NAME is deprecated and ignored because DB_DATABASE is set"
+  else
+    echo >&2 "WARNING: DB_NAME is deprecated; use DB_DATABASE instead"
+  fi
+fi
+if [ "$DB_USER_WAS_SET" = "x" ]; then
+  if [ "$DB_USERNAME_WAS_SET" = "x" ]; then
+    echo >&2 "WARNING: DB_USER is deprecated and ignored because DB_USERNAME is set"
+  else
+    echo >&2 "WARNING: DB_USER is deprecated; use DB_USERNAME instead"
+  fi
+fi
+if [ "$LIBRENMS_BASE_URL_WAS_SET" = "x" ]; then
+  if [ "$APP_URL_WAS_SET" = "x" ]; then
+    echo >&2 "WARNING: LIBRENMS_BASE_URL is deprecated and ignored because APP_URL is set"
+  else
+    echo >&2 "WARNING: LIBRENMS_BASE_URL is deprecated; use APP_URL instead"
+  fi
+fi
 
 TZ=${TZ:-UTC}
 
@@ -44,11 +100,10 @@ MAX_INPUT_VARS=${MAX_INPUT_VARS:-1000}
 MEMCACHED_PORT=${MEMCACHED_PORT:-11211}
 
 DB_PORT=${DB_PORT:-3306}
-DB_NAME=${DB_NAME:-librenms}
-DB_USER=${DB_USER:-librenms}
-DB_TIMEOUT=${DB_TIMEOUT:-30}
+DB_DATABASE=${DB_DATABASE:-${DB_NAME:-librenms}}
+DB_USERNAME=${DB_USERNAME:-${DB_USER:-librenms}}
 
-LIBRENMS_BASE_URL=${LIBRENMS_BASE_URL:-/}
+APP_URL=${APP_URL:-${LIBRENMS_BASE_URL:-/}}
 
 # Timezone
 echo "Setting timezone to ${TZ}..."
@@ -131,14 +186,30 @@ if [ -z "$DB_PASSWORD" ]; then
   echo >&2 "ERROR: Either DB_PASSWORD or DB_PASSWORD_FILE must be defined"
   exit 1
 fi
-cat >${LIBRENMS_PATH}/.env <<EOL
-APP_URL=${LIBRENMS_BASE_URL}
-DB_HOST=${DB_HOST}
-DB_PORT=${DB_PORT}
-DB_DATABASE=${DB_NAME}
-DB_USERNAME=${DB_USER}
-DB_PASSWORD="${DB_PASSWORD}"
-EOL
+
+# LibreNMS uses Laravel's variable names. Explicit environment configuration
+# takes precedence, while an existing /data/.env remains a supported fallback.
+set_mapped_env 'APP_URL' "$APP_URL" "$APP_URL_WAS_SET" "$LIBRENMS_BASE_URL_WAS_SET"
+set_container_env 'DB_HOST' "$DB_HOST"
+set_mapped_env 'DB_PORT' "$DB_PORT" "$DB_PORT_WAS_SET" "$DB_PORT_WAS_SET"
+set_mapped_env 'DB_DATABASE' "$DB_DATABASE" "$DB_DATABASE_WAS_SET" "$DB_NAME_WAS_SET"
+set_mapped_env 'DB_USERNAME' "$DB_USERNAME" "$DB_USERNAME_WAS_SET" "$DB_USER_WAS_SET"
+set_container_env 'DB_PASSWORD' "$DB_PASSWORD"
+
+# PHP-FPM clears its environment by default. Pass only supported values that
+# are actually defined so an unset variable can still fall back to /data/.env.
+for var in \
+  APP_URL \
+  DB_HOST DB_PORT DB_DATABASE DB_USERNAME DB_PASSWORD \
+  CACHE_DRIVER SESSION_DRIVER \
+  REDIS_HOST REDIS_SENTINEL REDIS_SENTINEL_SERVICE REDIS_SCHEME REDIS_PORT \
+  REDIS_PASSWORD REDIS_DB REDIS_CACHE_DB \
+  MEMCACHED_HOST MEMCACHED_PORT \
+  LOG_CHANNEL LOG_LEVEL STDOUT_LOG_LEVEL; do
+  if [ "${!var+x}" = "x" ]; then
+    printf 'env[%s] = $%s\n' "$var" "$var" >>/etc/php84/php-fpm.d/www.conf
+  fi
+done
 
 # Config : Directories
 cat >${LIBRENMS_PATH}/database/seeders/config/directories.yaml <<EOL
@@ -151,7 +222,7 @@ ln -sf /data/logs ${LIBRENMS_PATH}/logs
 # Config : Server
 cat >${LIBRENMS_PATH}/database/seeders/config/server.yaml <<EOL
 own_hostname: '$(hostname)'
-base_url: '${LIBRENMS_BASE_URL}'
+base_url: '${APP_URL}'
 EOL
 
 # Config : User

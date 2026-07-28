@@ -244,7 +244,8 @@ processes and Laravel's configuration cache on each start.
 
 Existing deployments that use Docker's `--env-file` or Compose `env_file`
 remain compatible because Docker injects those values into the container
-environment. The supplied examples no longer require either mechanism.
+environment. An example using `env_file` is available in
+[examples/librenms-env](examples/librenms-env).
 
 ### Command line
 

@@ -1,19 +1,5 @@
 name: librenms
 
-x-librenms-environment: &librenms-environment
-  TZ: &TZ Europe/Paris
-  PUID: &PUID "1000"
-  PGID: &PGID "1000"
-  DB_HOST: db
-  DB_DATABASE: &DB_DATABASE librenms
-  DB_USERNAME: &DB_USERNAME librenms
-  DB_PASSWORD: &DB_PASSWORD asupersecretpassword
-  DB_TIMEOUT: "60"
-  CACHE_DRIVER: redis
-  SESSION_DRIVER: redis
-  REDIS_HOST: redis
-  RRDCACHED_SERVER: rrdcached:42217
-
 services:
   db:
     image: mariadb:11.8
@@ -27,18 +13,18 @@ services:
     volumes:
       - "./db:/var/lib/mysql"
     environment:
-      TZ: *TZ
-      MARIADB_RANDOM_ROOT_PASSWORD: "yes"
-      MARIADB_DATABASE: *DB_DATABASE
-      MARIADB_USER: *DB_USERNAME
-      MARIADB_PASSWORD: *DB_PASSWORD
+      - "TZ=${TZ}"
+      - "MARIADB_RANDOM_ROOT_PASSWORD=yes"
+      - "MARIADB_DATABASE=${MYSQL_DATABASE}"
+      - "MARIADB_USER=${MYSQL_USER}"
+      - "MARIADB_PASSWORD=${MYSQL_PASSWORD}"
     restart: always
 
   redis:
     image: redis:7.2-alpine
     container_name: librenms_redis
     environment:
-      TZ: *TZ
+      - "TZ=${TZ}"
     restart: always
 
   rrdcached:
@@ -48,29 +34,21 @@ services:
       - "./rrd/db:/data/db"
       - "./rrd/journal:/data/journal"
     environment:
-      TZ: *TZ
-      PUID: *PUID
-      PGID: *PGID
-      LOG_LEVEL: LOG_INFO
-      WRITE_TIMEOUT: "1800"
-      WRITE_JITTER: "1800"
-      WRITE_THREADS: "4"
-      FLUSH_DEAD_DATA_INTERVAL: "3600"
+      - "TZ=${TZ}"
+      - "PUID=${PUID}"
+      - "PGID=${PGID}"
+      - "LOG_LEVEL=LOG_INFO"
+      - "WRITE_TIMEOUT=1800"
+      - "WRITE_JITTER=1800"
+      - "WRITE_THREADS=4"
+      - "FLUSH_DEAD_DATA_INTERVAL=3600"
     restart: always
 
   msmtpd:
     image: crazymax/msmtpd:latest
     container_name: librenms_msmtpd
-    environment:
-      SMTP_HOST: smtp.gmail.com
-      SMTP_PORT: "587"
-      SMTP_TLS: "on"
-      SMTP_STARTTLS: "on"
-      SMTP_TLS_CHECKCERT: "on"
-      SMTP_AUTH: "on"
-      SMTP_USER: foo
-      SMTP_PASSWORD: bar
-      SMTP_FROM: foo@gmail.com
+    env_file:
+      - "./msmtpd.env"
     restart: always
 
   librenms:
@@ -91,8 +69,17 @@ services:
       - msmtpd
     volumes:
       - "./librenms:/data"
+    env_file:
+      - "./librenms.env"
     environment:
-      <<: *librenms-environment
+      - "TZ=${TZ}"
+      - "PUID=${PUID}"
+      - "PGID=${PGID}"
+      - "DB_HOST=db"
+      - "DB_DATABASE=${MYSQL_DATABASE}"
+      - "DB_USERNAME=${MYSQL_USER}"
+      - "DB_PASSWORD=${MYSQL_PASSWORD}"
+      - "DB_TIMEOUT=60"
     restart: always
 
   dispatcher:
@@ -107,10 +94,19 @@ services:
       - redis
     volumes:
       - "./librenms:/data"
+    env_file:
+      - "./librenms.env"
     environment:
-      <<: *librenms-environment
-      NODE_ID: dispatcher1
-      SIDECAR_DISPATCHER: "1"
+      - "TZ=${TZ}"
+      - "PUID=${PUID}"
+      - "PGID=${PGID}"
+      - "DB_HOST=db"
+      - "DB_DATABASE=${MYSQL_DATABASE}"
+      - "DB_USERNAME=${MYSQL_USER}"
+      - "DB_PASSWORD=${MYSQL_PASSWORD}"
+      - "DB_TIMEOUT=60"
+      - "NODE_ID=dispatcher1"
+      - "SIDECAR_DISPATCHER=1"
     restart: always
 
   syslogng:
@@ -132,9 +128,18 @@ services:
         protocol: udp
     volumes:
       - "./librenms:/data"
+    env_file:
+      - "./librenms.env"
     environment:
-      <<: *librenms-environment
-      SIDECAR_SYSLOGNG: "1"
+      - "TZ=${TZ}"
+      - "PUID=${PUID}"
+      - "PGID=${PGID}"
+      - "DB_HOST=db"
+      - "DB_DATABASE=${MYSQL_DATABASE}"
+      - "DB_USERNAME=${MYSQL_USER}"
+      - "DB_PASSWORD=${MYSQL_PASSWORD}"
+      - "DB_TIMEOUT=60"
+      - "SIDECAR_SYSLOGNG=1"
     restart: always
 
   snmptrapd:
@@ -156,7 +161,16 @@ services:
         protocol: udp
     volumes:
       - "./librenms:/data"
+    env_file:
+      - "./librenms.env"
     environment:
-      <<: *librenms-environment
-      SIDECAR_SNMPTRAPD: "1"
+      - "TZ=${TZ}"
+      - "PUID=${PUID}"
+      - "PGID=${PGID}"
+      - "DB_HOST=db"
+      - "DB_DATABASE=${MYSQL_DATABASE}"
+      - "DB_USERNAME=${MYSQL_USER}"
+      - "DB_PASSWORD=${MYSQL_PASSWORD}"
+      - "DB_TIMEOUT=60"
+      - "SIDECAR_SNMPTRAPD=1"
     restart: always

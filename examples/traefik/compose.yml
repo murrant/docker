@@ -1,17 +1,25 @@
 name: librenms
 
+# ↓↓↓ Change this to your own password and timezone before first run ↓↓↓
+x-db-password: &db-password asupersecretpassword
+x-tz: &tz Europe/Paris
+
+x-db-database: &db-database librenms
+x-db-username: &db-username librenms
+
 x-librenms-environment: &librenms-environment
-  TZ: &TZ Europe/Paris
-  PUID: &PUID "1000"
-  PGID: &PGID "1000"
+  TZ: *tz
+  PUID: "1000"
+  PGID: "1000"
   DB_HOST: db
-  DB_DATABASE: &DB_DATABASE librenms
-  DB_USERNAME: &DB_USERNAME librenms
-  DB_PASSWORD: &DB_PASSWORD asupersecretpassword
+  DB_DATABASE: *db-database
+  DB_USERNAME: *db-username
+  DB_PASSWORD: *db-password
   DB_TIMEOUT: "60"
   CACHE_DRIVER: redis
   SESSION_DRIVER: redis
   REDIS_HOST: redis
+  RRDCACHED_SERVER: rrdcached:42217
   LOG_IP_VAR: http_x_forwarded_for
 
 services:
@@ -61,23 +69,41 @@ services:
     volumes:
       - "./db:/var/lib/mysql"
     environment:
-      TZ: *TZ
+      TZ: *tz
       MARIADB_RANDOM_ROOT_PASSWORD: "yes"
-      MARIADB_DATABASE: *DB_DATABASE
-      MARIADB_USER: *DB_USERNAME
-      MARIADB_PASSWORD: *DB_PASSWORD
+      MARIADB_DATABASE: *db-database
+      MARIADB_USER: *db-username
+      MARIADB_PASSWORD: *db-password
     restart: always
 
   redis:
     image: redis:7.2-alpine
     container_name: librenms_redis
     environment:
-      TZ: *TZ
+      TZ: *tz
+    restart: always
+
+  rrdcached:
+    image: crazymax/rrdcached
+    container_name: librenms_rrdcached
+    volumes:
+      - "./rrd/db:/data/db"
+      - "./rrd/journal:/data/journal"
+    environment:
+      TZ: *tz
+      PUID: "1000"
+      PGID: "1000"
+      LOG_LEVEL: LOG_INFO
+      WRITE_TIMEOUT: "1800"
+      WRITE_JITTER: "1800"
+      WRITE_THREADS: "4"
+      FLUSH_DEAD_DATA_INTERVAL: "3600"
     restart: always
 
   msmtpd:
     image: crazymax/msmtpd:latest
     container_name: librenms_msmtpd
+    # ↓↓↓ Set your own SMTP credentials before first run if you want email ↓↓↓
     environment:
       SMTP_HOST: smtp.gmail.com
       SMTP_PORT: "587"
@@ -97,6 +123,7 @@ services:
     depends_on:
       - db
       - redis
+      - rrdcached
       - msmtpd
     volumes:
       - "./librenms:/data"
